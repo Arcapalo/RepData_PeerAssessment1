@@ -1,0 +1,176 @@
+---
+title: "Reproducible Research"
+output: 
+  html_document:
+    keep_md: true
+---
+  
+    
+```{r, include=FALSE}
+library(data.table)
+library(xtable)
+library(ggplot2)
+library(knitr)
+opts_chunk$set(echo = TRUE, results = 'hold')
+```
+
+## Loading and preprocessing the data
+
+```{r}
+data_dir <- "C:/Users/RW/Documents";
+fileURL <- "https://github.com/Arcapalo/RepData_PeerAssessment1/" 
+fileSource <-"activity.zip"
+source_path <- paste(data_dir, "/", fileSource , sep="")
+txt_file <- paste(data_dir, "/","activity.csv", sep="")
+
+if (!file.exists(txt_file)) {
+        if (!file.exists(source_path)) {
+                message(paste("Please Wait! Load", fileURL, "..."));
+                download.file(fileURL, destfile=source_path);
+        } 
+        else {
+            message(paste("Please Wait! Unzip", source_path, " file..."));
+            unzip(source_path, exdir = data_dir);
+        }
+}
+message(paste("Please Wait! Load", txt_file, " to dataset..."));
+activity <- read.csv(txt_file, header=TRUE,   sep=",",
+                    colClasses=c("numeric", "character", "numeric"))
+activity$interval <- factor(activity$interval)
+activity$date <- as.Date(activity$date, format="%Y-%m-%d")
+```
+## What is mean total number of steps taken per day?
+
+```{r, echo=FALSE}
+steps_per_day <- aggregate(steps ~ date, activity, sum)
+ggplot(steps_per_day, aes(x = steps)) + 
+       geom_histogram(fill = "darkred", binwidth = 1000) + 
+        labs(title="Steps Taken per Day", 
+             x = "Number of Steps per Day", y = "Number of times (Count)") + 
+        theme_bw()    
+mean_steps = format(round(mean(steps_per_day$steps),2), scientific = FALSE)
+median_steps = format(round(median(steps_per_day$steps),2), scientific = FALSE)
+
+```
+
+The MEAN of total number of steps taken per day is `r mean_steps`  
+The MEDIAN of total number of steps taken per day is `r median_steps`
+
+## What is the average daily activity pattern?
+
+```{r, echo=FALSE}
+steps_time_interval <- aggregate(activity$steps, 
+                                by = list(interval = activity$interval),
+                                FUN=mean, na.rm=TRUE)
+
+steps_time_interval$interval <- as.integer(levels(steps_time_interval$interval)[steps_time_interval$interval])
+colnames(steps_time_interval) <- c("interval", "steps")
+
+ggplot(steps_time_interval, aes(x=interval, y=steps)) +   
+        geom_line(color="blue", size=1) +  
+        labs(title="Average Daily Activity Pattern", x="Interval", y="Number of steps") +  
+        theme_bw() + theme(legend.position = "bottom")
+max_step_interval <- steps_time_interval[which.max(steps_time_interval$steps),]$interval
+```
+
+
+Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps?  
+`r max_step_interval`  
+
+## Inputing missing values
+
+```{r, echo=FALSE}
+missing <- nrow(activity)-nrow(na.omit(activity))
+```
+
+The total number of missing values in the dataset is `r missing` rows.
+
+```{r}
+## Filling in missing values  
+fill_missing <- function(data, defaults) {
+        na_indices <- which(is.na(data$steps))
+        na_replacements <- unlist(lapply(na_indices, FUN=function(idx){
+                interval = data[idx,]$interval
+                defaults[defaults$interval == interval,]$steps
+        }))
+        fill_steps <- data$steps
+        fill_steps[na_indices] <- na_replacements
+        fill_steps
+}
+
+##  New dataset with the missing data filled in
+data_fill <- data.frame(  
+        steps = fill_missing(activity, steps_time_interval),  
+        date = activity$date,  
+        interval = activity$interval)
+```
+
+```{r, echo=FALSE}
+## Total number of steps taken each day histogram
+full_steps_per_day <- aggregate(steps ~ date, data_fill, sum)
+colnames(full_steps_per_day) <- c("date", "steps")
+    
+ggplot(full_steps_per_day, aes(x=steps)) + 
+        geom_histogram(fill="darkred", binwidth=1000) + 
+        labs(title="Full Steps Taken per Day", 
+             x="Number of Steps with filled in missing values", 
+             y="Count") + 
+        theme_bw()     
+        
+full_mean_steps = format(round(mean(full_steps_per_day$steps), 2), scientific = FALSE)
+full_median_steps = format(round(median(full_steps_per_day$steps), 2), scientific = FALSE)
+```
+
+Mean of total number of steps (with missing) taken per day is `r full_mean_steps`.  
+Median of total number of steps (with missing) taken per day is `r full_median_steps`.  
+
+These values DO differ from the estimates from the not filled ones 
+
+The MEAN of total number of steps taken per day is `r mean_steps`  
+The MEDIAN of total number of steps taken per day is `r median_steps`
+
+Despite missing values had increased the peak, the impact on the predictions is not significant  
+
+
+  
+##Are there differences in activity patterns between weekdays and weekends?
+```{r, echo=FALSE}
+## Indicating whether a given date is a weekday or weekend day.
+wkdays_steps <- function(data) {
+    wkdays_steps <- aggregate(data$steps, by=list(interval = data$interval),
+                          FUN=mean, na.rm=T)
+    # convert to integers for plotting
+    wkdays_steps$interval <- 
+            as.integer(levels(wkdays_steps$interval)[wkdays_steps$interval])
+    colnames(wkdays_steps) <- c("interval", "steps")
+    wkdays_steps
+}
+
+data_by_wkdays <- function(data) {
+    data$weekday <- 
+            as.factor(weekdays(data$date)) # weekdays in portuguese
+    weekend_data <- subset(data, weekday %in% c("s bado","domingo"))
+    weekday_data <- subset(data, !weekday %in% c("s bado","domingo"))
+    
+    weekend_steps <- wkdays_steps(weekend_data)
+    weekday_steps <- wkdays_steps(weekday_data)
+    
+    weekend_steps$dayofweek <- rep("weekend", nrow(weekend_steps))
+    weekday_steps$dayofweek <- rep("weekday", nrow(weekday_steps))
+    
+    data_by_wkdays <- rbind(weekend_steps, weekday_steps)
+    data_by_wkdays$dayofweek <- as.factor(data_by_wkdays$dayofweek)
+    data_by_wkdays
+}
+
+data_weekdays <- data_by_wkdays(data_fill)
+```
+
+```{r, echo=FALSE}
+## Average number of steps taken per 5-minute interval on weekdays and weekends
+ggplot(data_weekdays, aes(x=interval, y=steps)) + 
+        geom_line(color="blue", size=1) + 
+        facet_wrap(~ dayofweek, nrow=2, ncol=1) +
+        labs(x="Interval", y="Number of steps") +
+        theme_bw()
+```
